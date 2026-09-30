@@ -11,6 +11,7 @@ from boltz.data.types import (
     StructureV2,
     TokenBondV2,
     Tokenized,
+    TokenizedTraining,
     TokenV2,
 )
 
@@ -424,3 +425,32 @@ class Boltz2Tokenizer(Tokenizer):
             extra_mols=data.extra_mols,
         )
         return tokenized
+
+
+class Boltz2TrainingTokenizer(Tokenizer):
+    """Tokenize a bare training structure using the current Boltz-2 schema.
+
+    The upstream training stack historically exposed this adapter, while the
+    inference tokenizer consumes a richer :class:`Input`.  Keep the small
+    adapter here so the MSCD data module can continue to consume processed
+    ``StructureV2`` records after rebasing onto current upstream Boltz.
+    """
+
+    def __init__(self, atomize_modified_residues: bool = False) -> None:
+        if atomize_modified_residues:
+            msg = "atomize_modified_residues is not supported by the current tokenizer"
+            raise ValueError(msg)
+
+    def tokenize(
+        self,
+        struct: StructureV2,
+        training: bool = False,
+        res_name_to_overwrite: Optional[dict] = None,
+    ) -> TokenizedTraining:
+        """Tokenize one processed training structure."""
+        del training
+        if res_name_to_overwrite:
+            msg = "res_name_to_overwrite is not supported by the current tokenizer"
+            raise ValueError(msg)
+        token_data, token_bonds = tokenize_structure(struct)
+        return TokenizedTraining(token_data, token_bonds, struct)

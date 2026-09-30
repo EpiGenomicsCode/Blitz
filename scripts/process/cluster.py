@@ -46,7 +46,8 @@ def main(args: argparse.Namespace) -> None:
         f.write("\n".join(proteins))
 
     subprocess.run(
-        f"{args.mmseqs} easy-cluster {outdir / 'proteins.fasta'} {outdir / 'clust_prot'} {outdir / 'tmp'} --min-seq-id 0.4",  # noqa: E501
+        f"{args.mmseqs} easy-cluster {outdir / 'proteins.fasta'} {outdir / 'clust_prot'} {outdir / 'tmp'} "  # noqa: E501
+        f"--min-seq-id 0.4 --threads {args.threads}",
         shell=True,  # noqa: S602
         check=True,
     )
@@ -106,6 +107,12 @@ if __name__ == "__main__":
         type=str,
         help="Path to mmseqs program.",
         default="mmseqs",
+    )
+    parser.add_argument(
+        "--threads",
+        type=int,
+        help="Number of threads for mmseqs (do not default to all cores).",
+        default=8,
     )
     args = parser.parse_args()
     main(args)

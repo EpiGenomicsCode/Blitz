@@ -668,6 +668,14 @@ class ContactPotentital(FlatBottomPotential, DistancePotential):
 
 
 def get_potentials(steering_args, boltz2=False):
+    profile = steering_args.get("steering_schedule_profile")
+    if profile in {"blitz_k8", "blitz_k16"}:
+        # Lazy import avoids a cycle: the Blitz factory composes the public
+        # potential classes defined in this module.
+        from boltz.model.potentials.blitz import get_blitz_potentials
+
+        return get_blitz_potentials(steering_args, boltz2=boltz2)
+
     potentials = []
     if steering_args["fk_steering"] or steering_args["physical_guidance_update"]:
         potentials.extend(

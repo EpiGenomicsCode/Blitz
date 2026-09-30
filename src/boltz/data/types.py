@@ -73,9 +73,30 @@ class JSONSerializable(DataClassDictMixin):
         path : Path
             The path to the file.
 
+        Notes
+        -----
+        Writes via a sibling temp file + ``os.replace`` so concurrent readers
+        never observe a partially written JSON file.
+
         """
-        with path.open("w") as f:
-            json.dump(self.to_dict(), f)
+        import os
+        import tempfile
+
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(
+            prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(self.to_dict(), f)
+            os.replace(tmp_name, path)
+        except Exception:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise
 
 
 ####################################################################################################
@@ -506,6 +527,7 @@ class ChainInfo:
     num_residues: int
     valid: bool = True
     entity_id: Optional[Union[str, int]] = None
+    template_ids: Optional[list[Union[str, int]]] = None
 
 
 @dataclass(frozen=True)
@@ -691,6 +713,30 @@ class Manifest(JSONSerializable):
 
 
 ####################################################################################################
+# TEMPLATE
+####################################################################################################
+
+TemplateCoordinates = [
+    ("res_idx", np.dtype("i4")),
+    ("res_type", np.dtype("i1")),
+    ("frame_rot", np.dtype("9f4")),
+    ("frame_t", np.dtype("3f4")),
+    ("coords_cb", np.dtype("3f4")),
+    ("coords_ca", np.dtype("3f4")),
+    ("mask_frame", np.dtype("?")),
+    ("mask_cb", np.dtype("?")),
+    ("mask_ca", np.dtype("?")),
+]
+
+
+@dataclass(frozen=True, slots=True)
+class Template(NumpySerializable):
+    """Template datatype."""
+
+    coordinates: np.ndarray
+
+
+####################################################################################################
 # INPUT
 ####################################################################################################
 
@@ -782,3 +828,24 @@ class Tokenized:
     template_tokens: Optional[dict[str, np.ndarray]] = None
     template_bonds: Optional[dict[str, np.ndarray]] = None
     extra_mols: Optional[dict[str, Mol]] = None
+
+
+@dataclass(frozen=True)
+class TokenizedTraining:
+    """Tokenized datatype."""
+
+    tokens: np.ndarray
+    bonds: np.ndarray
+    structure: Structure
+
+
+@dataclass(frozen=True, slots=True)
+class InputTraining:
+    """Input datatype."""
+
+    tokens: np.ndarray
+    bonds: np.ndarray
+    structure: Structure
+    msa: dict[str, MSA]
+    templates: dict[str, list[Template]]
+    record: Optional[Record] = None

@@ -11,9 +11,14 @@ def weighted_rigid_align(
     pred_coords,  # Float['b n 3'],       # predicted coordinates
     weights,  # Float['b n'],             # weights for each atom
     mask,  # Bool['b n'] | None = None    # mask for variable lengths
+    return_transform: bool = False,
 ):  # -> Float['b n 3']:
     """Algorithm 28 : note there is a problem with the pseudocode in the paper where predicted and
-    GT are swapped in algorithm 28, but correct in equation (2)."""
+    GT are swapped in algorithm 28, but correct in equation (2).
+
+    The determinant sign correction rejects reflections and keeps the fitted
+    transform a proper rotation.
+    """
 
     out_shape = torch.broadcast_shapes(true_coords.shape, pred_coords.shape)
     *batch_size, num_points, dim = out_shape
@@ -66,11 +71,11 @@ def weighted_rigid_align(
         dtype=torch.float32
     )
 
-    # Ensure proper rotation matrix with determinant 1
+    # Ensure proper rotation matrix with determinant 1 (sign(det), not raw det)
     F = torch.eye(dim, dtype=cov_matrix_32.dtype, device=cov_matrix.device)[
         None
     ].repeat(*batch_size, 1, 1)
-    F[..., -1, -1] = torch.det(rot_matrix)
+    F[..., -1, -1] = torch.sign(torch.det(rot_matrix))
     rot_matrix = einsum(U, F, V, "... i j, ... j k, ... l k -> ... i l")
     rot_matrix = rot_matrix.to(dtype=original_dtype)
 
@@ -81,7 +86,9 @@ def weighted_rigid_align(
     )
     aligned_coords.detach_()
 
-    return aligned_coords
+    if not return_transform:
+        return aligned_coords
+    return aligned_coords, rot_matrix, true_centroid, pred_centroid
 
 
 def smooth_lddt_loss(

@@ -1,3 +1,42 @@
+## Blitz
+
+Blitz distills the Boltz-2 structure model into deterministic 8-step and
+16-step students. This branch contains the code for training and running both
+models.
+
+On [Boltz's roughly 2,300-target benchmark](https://doi.org/10.1101/2025.06.14.659707):
+
+| system | model | NFE | complex lDDT ↑ | RF-valid ↑ | DockQ ↑ | ligand RMSD ↓ | any violation ↓ |
+|---|---|---:|---:|---:|---:|---:|---:|
+| AlphaFold 3 | teacher | 200 | 0.8615 | 41.5% | 0.4198 | 6.63 Å | 9.8% |
+| AlphaFold 3 | Blitz K8 | 8 | **0.8635** | 40.5% | **0.4207** | **6.44 Å** | 11.3% |
+| AlphaFold 3 | Blitz K16 | 16 | **0.8634** | **42.3%** | 0.4167 | **6.51 Å** | **6.8%** |
+| Boltz-2 | teacher | 600 | 0.8499 | 98.5% | 0.3929 | 9.00 Å | 30.3% |
+| Boltz-2 | Blitz K8 | 8 | 0.8492 | 93.7% | 0.3897 | **8.75 Å** | 41.9% |
+| Boltz-2 | Blitz K16 | 16 | **0.8533** | 94.1% | **0.3932** | **8.78 Å** | **26.7%** |
+
+Every row uses the same five-candidate reranker. Bold values are student point
+estimates that improve on the corresponding teacher. The AF3 results show the
+same overall pattern: teacher-level structural accuracy at a small fraction of
+the sampling cost, with K16 also improving the violation rate. NFE counts
+denoiser evaluations; the Boltz-2 teacher uses three recycle updates.
+
+AlphaFold 3 checkpoints are not included because Google DeepMind's terms do
+not permit public redistribution of the model parameters.
+
+Download the standalone inference checkpoints from
+[`vinaymatt/Blitz-Boltz2`](https://huggingface.co/vinaymatt/Blitz-Boltz2).
+
+K16 is the best default. K8 trades some validity for fewer denoising steps.
+
+See the [quickstart](docs/blitz/QUICKSTART.md) to run the models. The
+[training](docs/blitz/TRAINING.md), [data](docs/blitz/DATA.md), and
+[results](docs/blitz/RESULTS.md) pages describe how they were produced and
+evaluated. [Model lineage](docs/blitz/PROVENANCE.md) explains how this branch
+relates to upstream Boltz. The original Boltz README follows.
+
+---
+
 <div align="center">
   <div>&nbsp;</div>
   <img src="docs/boltz2_title.png" width="300"/>

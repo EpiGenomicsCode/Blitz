@@ -408,9 +408,13 @@ class Boltz2(LightningModule):
         diffusion_samples: int = 1,
         max_parallel_samples: Optional[int] = None,
         run_confidence_sequentially: bool = False,
+        return_trunk_features: bool = False,
     ) -> dict[str, Tensor]:
+        # Respect outer no_grad (e.g. compute_trunk_features for MSCD teacher trunk)
         with torch.set_grad_enabled(
-            self.training and self.structure_prediction_training
+            self.training
+            and self.structure_prediction_training
+            and torch.is_grad_enabled()
         ):
             s_inputs = self.input_embedder(feats)
 
@@ -442,6 +446,7 @@ class Boltz2(LightningModule):
                         self.training
                         and self.structure_prediction_training
                         and (i == recycling_steps)
+                        and torch.is_grad_enabled()
                     ):
                         # Issue with unused parameters in autocast
                         if (
@@ -488,6 +493,32 @@ class Boltz2(LightningModule):
                             pair_mask=pair_mask,
                             use_kernels=self.use_kernels,
                         )
+
+            # MSCD / distillation early exit: trunk + diffusion conditioning only
+            if return_trunk_features:
+                q, c, to_keys, atom_enc_bias, atom_dec_bias, token_trans_bias = (
+                    self.diffusion_conditioning(
+                        s_trunk=s,
+                        z_trunk=z,
+                        relative_position_encoding=relative_position_encoding,
+                        feats=feats,
+                    )
+                )
+                return {
+                    "s_inputs": s_inputs,
+                    "s": s,
+                    "z": z,
+                    "relative_position_encoding": relative_position_encoding,
+                    "diffusion_conditioning": {
+                        "q": q,
+                        "c": c,
+                        "to_keys": to_keys,
+                        "atom_enc_bias": atom_enc_bias,
+                        "atom_dec_bias": atom_dec_bias,
+                        "token_trans_bias": token_trans_bias,
+                    },
+                    "batch": feats,
+                }
 
             pdistogram = self.distogram_module(z)
             dict_out = {

@@ -195,13 +195,22 @@ def download_boltz1(cache: Path) -> None:
 
 
 @rank_zero_only
-def download_boltz2(cache: Path) -> None:
+def download_boltz2(
+    cache: Path,
+    *,
+    download_structure_model: bool = True,
+    download_affinity_model: bool = True,
+) -> None:
     """Download all the required data.
 
     Parameters
     ----------
     cache : Path
         The cache directory.
+    download_structure_model : bool
+        Download the default structure checkpoint when it is not already cached.
+    download_affinity_model : bool
+        Download the default affinity checkpoint when it is not already cached.
 
     """
     # Download CCD
@@ -225,7 +234,7 @@ def download_boltz2(cache: Path) -> None:
 
     # Download model
     model = cache / "boltz2_conf.ckpt"
-    if not model.exists():
+    if download_structure_model and not model.exists():
         click.echo(
             f"Downloading the Boltz-2 weights to {model}. You may "
             "change the cache directory with the --cache flag."
@@ -242,7 +251,7 @@ def download_boltz2(cache: Path) -> None:
 
     # Download affinity model
     affinity_model = cache / "boltz2_aff.ckpt"
-    if not affinity_model.exists():
+    if download_affinity_model and not affinity_model.exists():
         click.echo(
             f"Downloading the Boltz-2 affinity weights to {affinity_model}. You may "
             "change the cache directory with the --cache flag."
@@ -971,6 +980,15 @@ def cli() -> None:
     help="Whether to use potentials for steering. Default is False.",
 )
 @click.option(
+    "--blitz_policy",
+    type=click.Choice(["k8", "k16"]),
+    default=None,
+    help=(
+        "Use the deterministic Blitz K8 or K16 sampler. Requires a Blitz "
+        "checkpoint and enables its geometry correction."
+    ),
+)
+@click.option(
     "--model",
     default="boltz2",
     type=click.Choice(["boltz1", "boltz2"]),
@@ -1068,6 +1086,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     api_key_header: Optional[str] = None,
     api_key_value: Optional[str] = None,
     use_potentials: bool = False,
+    blitz_policy: Optional[Literal["k8", "k16"]] = None,
     model: Literal["boltz1", "boltz2"] = "boltz2",
     method: Optional[str] = None,
     affinity_mw_correction: Optional[bool] = False,
@@ -1079,6 +1098,26 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     write_embeddings: bool = False,
 ) -> None:
     """Run predictions with Boltz."""
+    if blitz_policy is not None:
+        if model != "boltz2":
+            raise click.UsageError("--blitz-policy is supported only for Boltz-2")
+        if checkpoint is None:
+            raise click.UsageError("--blitz-policy requires --checkpoint")
+        from boltz.model.potentials.blitz import standalone_blitz_profile
+
+        embedded_profile = standalone_blitz_profile(checkpoint)
+        if embedded_profile is None:
+            raise click.UsageError(
+                "--checkpoint must be a standalone Blitz checkpoint"
+            )
+        expected_profile = f"blitz_{blitz_policy}"
+        if embedded_profile != expected_profile:
+            raise click.UsageError(
+                f"checkpoint contains {embedded_profile}, not {expected_profile}"
+            )
+        sampling_steps = 8 if blitz_policy == "k8" else 16
+        use_potentials = True
+
     # If cpu, write a friendly warning
     if accelerator == "cpu":
         msg = "Running on CPU, this will be slow. Consider using a GPU."
@@ -1138,7 +1177,11 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     if model == "boltz1":
         download_boltz1(cache)
     elif model == "boltz2":
-        download_boltz2(cache)
+        download_boltz2(
+            cache,
+            download_structure_model=checkpoint is None,
+            download_affinity_model=False,
+        )
     else:
         msg = f"Model {model} not supported. Supported: boltz1, boltz2."
         raise ValueError(f"Model {model} not supported.")
@@ -1323,6 +1366,12 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             msa_args=asdict(msa_args),
             steering_args=asdict(steering_args),
         )
+        if blitz_policy is not None:
+            from boltz.model.potentials.blitz import configure_blitz_model
+
+            profile = f"blitz_{blitz_policy}"
+            configure_blitz_model(model_module, profile)
+            click.echo(f"Loaded Blitz {blitz_policy.upper()} policy.")
         model_module.eval()
 
         # Compute structure predictions
@@ -1381,6 +1430,11 @@ def predict(  # noqa: C901, PLR0915, PLR0912
 
         # Load affinity model
         if affinity_checkpoint is None:
+            download_boltz2(
+                cache,
+                download_structure_model=False,
+                download_affinity_model=True,
+            )
             affinity_checkpoint = cache / "boltz2_aff.ckpt"
 
         steering_args = BoltzSteeringParams()

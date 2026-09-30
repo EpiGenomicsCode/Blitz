@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from math import sqrt
 
 import numpy as np
@@ -220,6 +221,7 @@ class AtomDiffusion(Module):
         self.noise_scale = noise_scale
         self.step_scale = step_scale
         self.step_scale_random = step_scale_random
+        self.exp_exact_step = False
         self.coordinate_augmentation = coordinate_augmentation
         self.coordinate_augmentation_inference = (
             coordinate_augmentation_inference
@@ -327,6 +329,26 @@ class AtomDiffusion(Module):
             max_parallel_samples = multiplicity
 
         num_sampling_steps = default(num_sampling_steps, self.num_sampling_steps)
+        terminal_projection = bool(
+            getattr(self, "steering_terminal_clean_projection", False)
+        )
+        terminal_projection_scale = float(
+            getattr(self, "steering_terminal_clean_projection_scale", 1.0)
+        )
+        terminal_projection_steps = int(
+            getattr(
+                self,
+                "steering_terminal_clean_projection_num_gd_steps",
+                steering_args["num_gd_steps"],
+            )
+        )
+        if terminal_projection and (
+            not math.isfinite(terminal_projection_scale)
+            or not 0.0 < terminal_projection_scale <= 1.0
+        ):
+            raise ValueError("terminal projection scale must be in (0, 1]")
+        if terminal_projection and terminal_projection_steps <= 0:
+            raise ValueError("terminal projection steps must be positive")
         atom_mask = atom_mask.repeat_interleave(multiplicity, 0)
 
         shape = (*atom_mask.shape, 3)
@@ -416,7 +438,7 @@ class AtomDiffusion(Module):
                     energy_traj = torch.cat((energy_traj, energy.unsqueeze(1)), dim=1)
 
                     # Compute log G values
-                    if step_idx == 0:
+                    if step_idx == 0 or energy_traj.shape[1] < 2:
                         log_G = -1 * energy
                     else:
                         log_G = energy_traj[:, -2] - energy_traj[:, -1]
@@ -444,9 +466,22 @@ class AtomDiffusion(Module):
                 if (
                     steering_args["physical_guidance_update"]
                     or steering_args["contact_guidance_update"]
-                ) and step_idx < num_sampling_steps - 1:
+                ) and (
+                    step_idx < num_sampling_steps - 1 or terminal_projection
+                ):
                     guidance_update = torch.zeros_like(atom_coords_denoised)
-                    for guidance_step in range(steering_args["num_gd_steps"]):
+                    is_terminal_projection = (
+                        terminal_projection and step_idx == num_sampling_steps - 1
+                    )
+                    guidance_scale = (
+                        terminal_projection_scale if is_terminal_projection else 1.0
+                    )
+                    guidance_steps = (
+                        terminal_projection_steps
+                        if is_terminal_projection
+                        else steering_args["num_gd_steps"]
+                    )
+                    for guidance_step in range(guidance_steps):
                         energy_gradient = torch.zeros_like(atom_coords_denoised)
                         for potential in potentials:
                             parameters = potential.compute_parameters(steering_t)
@@ -455,12 +490,14 @@ class AtomDiffusion(Module):
                                 and (guidance_step) % parameters["guidance_interval"]
                                 == 0
                             ):
-                                energy_gradient += parameters[
-                                    "guidance_weight"
-                                ] * potential.compute_gradient(
-                                    atom_coords_denoised + guidance_update,
-                                    network_condition_kwargs["feats"],
-                                    parameters,
+                                energy_gradient += (
+                                    guidance_scale
+                                    * parameters["guidance_weight"]
+                                    * potential.compute_gradient(
+                                        atom_coords_denoised + guidance_update,
+                                        network_condition_kwargs["feats"],
+                                        parameters,
+                                    )
                                 )
                         guidance_update -= energy_gradient
                     atom_coords_denoised += guidance_update
@@ -520,10 +557,23 @@ class AtomDiffusion(Module):
 
                 atom_coords_noisy = atom_coords_noisy.to(atom_coords_denoised)
 
-            denoised_over_sigma = (atom_coords_noisy - atom_coords_denoised) / t_hat
-            atom_coords_next = (
-                atom_coords_noisy + step_scale * (sigma_t - t_hat) * denoised_over_sigma
-            )
+            if self.exp_exact_step:
+                ratio = (
+                    (sigma_t / t_hat) ** float(step_scale)
+                    if t_hat > 0.0
+                    else 0.0
+                )
+                atom_coords_next = atom_coords_denoised + ratio * (
+                    atom_coords_noisy - atom_coords_denoised
+                )
+            else:
+                denoised_over_sigma = (
+                    atom_coords_noisy - atom_coords_denoised
+                ) / t_hat
+                atom_coords_next = (
+                    atom_coords_noisy
+                    + step_scale * (sigma_t - t_hat) * denoised_over_sigma
+                )
 
             atom_coords = atom_coords_next
 

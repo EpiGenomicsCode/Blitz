@@ -10,6 +10,7 @@ def weighted_rigid_align(
     pred_coords,
     weights,
     mask,
+    return_transform: bool = False,
 ):
     """Compute weighted alignment.
 
@@ -23,12 +24,16 @@ def weighted_rigid_align(
         The weights for alignment
     mask: torch.Tensor
         The atoms mask
+    return_transform: bool
+        If True, also return (rot_matrix, true_centroid, pred_centroid).
 
     Returns
     -------
     torch.Tensor
         Aligned coordinates
 
+    The determinant sign correction rejects reflections and keeps the fitted
+    transform a proper rotation.
     """
 
     batch_size, num_points, dim = true_coords.shape
@@ -76,11 +81,11 @@ def weighted_rigid_align(
     # Compute the rotation matrix
     rot_matrix = torch.einsum("b i j, b k j -> b i k", U, V).to(dtype=torch.float32)
 
-    # Ensure proper rotation matrix with determinant 1
+    # Ensure proper rotation matrix with determinant 1 (sign(det), not raw det)
     F = torch.eye(dim, dtype=cov_matrix_32.dtype, device=cov_matrix.device)[
         None
     ].repeat(batch_size, 1, 1)
-    F[:, -1, -1] = torch.det(rot_matrix)
+    F[:, -1, -1] = torch.sign(torch.det(rot_matrix))
     rot_matrix = einsum(U, F, V, "b i j, b j k, b l k -> b i l")
     rot_matrix = rot_matrix.to(dtype=original_dtype)
 
@@ -91,7 +96,9 @@ def weighted_rigid_align(
     )
     aligned_coords.detach_()
 
-    return aligned_coords
+    if not return_transform:
+        return aligned_coords
+    return aligned_coords, rot_matrix, true_centroid, pred_centroid
 
 
 def smooth_lddt_loss(
