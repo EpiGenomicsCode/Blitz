@@ -1,0 +1,194 @@
+trainer:
+  accelerator: cuda
+  devices: 1
+  num_nodes: 1
+  precision: 32
+  gradient_clip_val: 10.0
+  accumulate_grad_batches: 1
+  max_steps: 2200
+  log_every_n_steps: 1
+  check_val_every_n_epoch: 999
+  limit_val_batches: 0
+  num_sanity_val_steps: 0
+  enable_progress_bar: true
+output: ${oc.env:BOLTZ_MSCD_OUTPUT}
+pretrained: null
+resume: null
+disable_checkpoint: false
+matmul_precision: high
+find_unused_parameters: true
+save_top_k: 1
+v2: true
+checkpoint_monitor: val/mscd/lddt
+checkpoint_mode: max
+checkpoint_every_n_train_steps: 100
+data:
+  datasets:
+  - _target_: boltz.data.module.training_mscd.DatasetConfig
+    target_dir: ${oc.env:BOLTZ_RCSB_TARGET_DIR}
+    msa_dir: ${oc.env:BOLTZ_RCSB_MSA_DIR}
+    template_dir: ${oc.env:BOLTZ_RCSB_TEMPLATE_DIR}
+    prob: 0.55
+    filters:
+    - _target_: boltz.data.filter.dynamic.size.SizeFilter
+      min_chains: 1
+      max_chains: 300
+    - _target_: boltz.data.filter.dynamic.date.DateFilter
+      date: '2023-06-01'
+      ref: released
+    - _target_: boltz.data.filter.dynamic.resolution.ResolutionFilter
+      resolution: 9.0
+    sampler:
+      _target_: boltz.data.sample.v2.cluster.ClusterSampler
+    cropper:
+      _target_: boltz.data.crop.boltz.BoltzCropper
+      min_neighborhood: 0
+      max_neighborhood: 40
+    split: ./scripts/train/assets/validation_ids_v2.txt
+    symmetry_correction: true
+    val_group: RCSB
+  - _target_: boltz.data.module.training_mscd.DatasetConfig
+    target_dir: ${oc.env:BOLTZ_AFDB_TARGET_DIR}
+    msa_dir: ${oc.env:BOLTZ_AFDB_MSA_DIR}
+    template_dir: null
+    prob: 0.45
+    pack_index: ${oc.env:BOLTZ_AFDB_PACK_INDEX}
+    samples_path: ${oc.env:BOLTZ_AFDB_SAMPLES_PATH}
+    filters:
+    - _target_: boltz.data.filter.dynamic.size.SizeFilter
+      min_chains: 1
+      max_chains: 300
+    sampler:
+      _target_: boltz.data.sample.v2.cluster.ClusterSampler
+    cropper:
+      _target_: boltz.data.crop.boltz.BoltzCropper
+      min_neighborhood: 0
+      max_neighborhood: 40
+    symmetry_correction: true
+    override_method: AFDB
+    override_bfactor: true
+    val_group: AFDB
+  checkpoint_monitor_val_group: val/lddt
+  tokenizer:
+    _target_: boltz.data.tokenize.boltz2.Boltz2TrainingTokenizer
+  featurizer:
+    _target_: boltz.data.feature.featurizerv2_train.Boltz2Featurizer
+  moldir: ${oc.env:BOLTZ_CCD_MOL_DIR}
+  max_tokens: 384
+  max_atoms: 3456
+  max_seqs: 8192
+  pad_to_max_tokens: true
+  pad_to_max_atoms: true
+  pad_to_max_seqs: true
+  samples_per_epoch: 1280
+  batch_size: 1
+  num_workers: 0
+  random_seed: 42
+  pin_memory: false
+  overfit: null
+  return_train_symmetries: false
+  return_val_symmetries: true
+  train_binder_pocket_conditioned_prop: 0.15
+  val_binder_pocket_conditioned_prop: 0.15
+  train_contact_conditioned_prop: 0.15
+  val_contact_conditioned_prop: 0.15
+  binder_pocket_cutoff_val: 6.0
+  binder_pocket_cutoff_min: 4.0
+  binder_pocket_cutoff_max: 20.0
+  binder_pocket_sampling_geometric_p: 0.3
+  atoms_per_window_queries: 32
+  min_dist: 2.0
+  max_dist: 22.0
+  num_bins: 64
+  num_ensembles_train: 1
+  num_ensembles_val: 1
+  fix_single_ensemble: false
+  disto_use_ensemble: true
+  single_sequence_prop_training: 0.05
+  max_templates_train: 4
+  max_templates_val: 4
+  no_template_prob_train: 0.6
+  no_template_prob_val: 1.0
+  use_templates: true
+  msa_sampling_training: true
+  bfactor_md_correction: true
+model:
+  _target_: boltz.consistency.distill_mscd.BoltzMSCDistiller
+  cfg:
+    checkpointing:
+      teacher_loader:
+        path: ${oc.env:BOLTZ2_TEACHER_CKPT}
+        use_ema: false
+        spec: trunk_structure
+      distill:
+        recycles: 3
+    schedule:
+      S: 16
+      T_start: 200
+      T_end: 300
+      T_anneal_steps: 2200
+      T_anneal_shape: log_linear
+      sigma_data: 16.0
+      sigma_min_relative: 0.01
+      sigma_max_relative: 160.0
+      rho: 40.0
+    loss:
+      loss_type: pseudo_huber
+      weight_mode: sqrt_karras
+      huber_eps: 0.0001
+      huber_eps_mode: fixed
+      huber_c_base: 0.00054
+      pseudo_huber_reduce: vector
+      sampling_mode: edm
+      P_mean: -1.2
+      P_std: 1.5
+      teacher_step_scale: 1.0
+      terminal_anchor: true
+      terminal_teacher_hop: true
+      upweight_nucleic_ligand_atoms: true
+      sync_dropout: true
+      debug_invariants: true
+      smooth_lddt_loss_weight: 1.0
+      normalize_align_weights_per_sample: true
+    ema:
+      halflife_kimg: 50
+      rampup_ratio: 0.5
+      phema:
+        enabled: true
+        stds:
+        - 0.05
+        - 0.1
+        snapshot_every_n_steps: 500
+        prefix: phema
+    multiplicity:
+      train_multiplicity: 32
+      synchronize_sigmas_across_multiplicity: true
+    optimization:
+      max_lr: 3e-5
+      warmup_steps: 500
+      warmup_shape: linear
+      weight_decay: 0.0
+      adam_beta_1: 0.9
+      adam_beta_2: 0.999
+      adam_eps: 1.0e-08
+    drift_gate:
+      enabled: true
+      check_step: 200
+      min_rel_l2: 0.0001
+    validation_args:
+      recycling_steps: 3
+      sampling_steps: 16
+      diffusion_samples: 5
+      symmetry_correction: true
+      run_confidence_sequentially: false
+      integrator: euler
+      sample_gamma_0_override: 0.0
+      sample_step_scale_override: 1.0
+      metric_prefix: val/mscd
+    structure_validation_args:
+      enabled: true
+      recycling_steps: 3
+      sampling_steps: 16
+      diffusion_samples: 5
+      symmetry_correction: true
+      run_confidence_sequentially: false
