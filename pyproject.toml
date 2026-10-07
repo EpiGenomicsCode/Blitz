@@ -40,6 +40,7 @@ boltz = "boltz.main:cli"
 [project.optional-dependencies]
 lint = ["ruff"]
 test = ["pytest", "requests"]
+synthid = ["jax>=0.4.34"]
 cuda = [
     "cuequivariance_ops_cu12>=0.5.0",
     "cuequivariance_ops_torch_cu12>=0.5.0",
