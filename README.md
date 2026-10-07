@@ -1,12 +1,85 @@
-## Blitz
+# Blitz
 
-Blitz distills the Boltz-2 structure model into deterministic 8-step and
-16-step students. This branch contains the code for training and running both
-models.
+**Accelerating structure prediction through diffusion-model distillation.**
 
-On [Boltz's roughly 2,300-target benchmark](https://doi.org/10.1101/2025.06.14.659707):
+Blitz distills biomolecular structure-prediction models into deterministic
+8-step (K8) and 16-step (K16) students. The released **Boltz-2** students retain
+accuracy comparable to the teacher on the reported complex-structure benchmark
+while using far fewer denoiser evaluations. **K16 is the recommended default.**
 
-| system | model | NFE | complex lDDT ↑ | RF-valid ↑ | DockQ ↑ | ligand RMSD ↓ | any violation ↓ |
+This repository includes inference checkpoints, training and evaluation code,
+and a standalone [SynthID Bio structure detector](#synthid-bio-structure-detector).
+The distillation method was also tested with AlphaFold 3, however only Boltz-2 student weights are distributed here.
+
+[Quickstart](docs/blitz/QUICKSTART.md) ·
+[Results](docs/blitz/RESULTS.md) ·
+[Training](docs/blitz/TRAINING.md) ·
+[Training data](docs/blitz/DATA.md) ·
+[Model provenance](docs/blitz/PROVENANCE.md)
+
+## Installation
+
+Use a fresh environment with **Python 3.10–3.12**. Clone the `main` branch,
+which includes both Blitz and the SynthID Bio detector:
+
+```bash
+git clone --branch main https://github.com/EpiGenomicsCode/Blitz.git
+cd Blitz
+python -m pip install -e '.[cuda]'
+python -m pip install huggingface_hub
+```
+
+For CPU-only or non-CUDA hardware, replace `'.[cuda]'` with `'.'`; CPU inference
+is substantially slower. The optional `synthid` extra is needed only for the
+[detector](#synthid-bio-structure-detector).
+
+## Run a prediction
+
+### 1. Download the checkpoints
+
+The [Hugging Face release](https://huggingface.co/vinaymatt/Blitz-Boltz2)
+contains complete K8 and K16 prediction models.
+
+```bash
+hf download vinaymatt/Blitz-Boltz2 \
+  blitz-boltz2-k8.ckpt blitz-boltz2-k16.ckpt SHA256SUMS \
+  --local-dir checkpoints
+
+(cd checkpoints && sha256sum -c SHA256SUMS)
+```
+
+
+### 2. Prepare the input
+
+Create `input.yaml` using the [Boltz input format](docs/prediction.md).
+See [`examples/`](examples/) for sample inputs. For protein inputs, supply the
+required MSAs or add `--use_msa_server` to generate them through the MSA server.
+
+### 3. Run K16
+
+```bash
+boltz predict input.yaml \
+  --model boltz2 \
+  --checkpoint checkpoints/blitz-boltz2-k16.ckpt \
+  --blitz_policy k16 \
+  --recycling_steps 5 \
+  --diffusion_samples 5 \
+  --seed 1 \
+  --out_dir predictions-k16
+```
+
+For K8, use `blitz-boltz2-k8.ckpt` with `--blitz_policy k8`.
+
+The `--blitz_policy` flag loads the matching sampling schedule and endpoint
+geometry correction, and sets `--sampling_steps` to 8 or 16. 
+These are the documented benchmark inference settings. 
+
+## Benchmark results
+
+Results on the [Boltz-2 benchmark](https://doi.org/10.1101/2025.06.14.659707)
+of approximately 2,300 targets:
+
+| System | Model | NFE | Complex lDDT ↑ | RF-valid ↑ | DockQ ↑ | Ligand RMSD ↓ | Any violation ↓ |
 |---|---|---:|---:|---:|---:|---:|---:|
 | AlphaFold 3 | teacher | 200 | 0.8615 | 41.5% | 0.4198 | 6.63 Å | 9.8% |
 | AlphaFold 3 | Blitz K8 | 8 | **0.8635** | 40.5% | **0.4207** | **6.44 Å** | 11.3% |
@@ -15,116 +88,97 @@ On [Boltz's roughly 2,300-target benchmark](https://doi.org/10.1101/2025.06.14.6
 | Boltz-2 | Blitz K8 | 8 | 0.8492 | 93.7% | 0.3897 | **8.75 Å** | 41.9% |
 | Boltz-2 | Blitz K16 | 16 | **0.8533** | 94.1% | **0.3932** | **8.78 Å** | **26.7%** |
 
-Every row uses the same five-candidate reranker. Bold values are student point
-estimates that improve on the corresponding teacher. The AF3 results show the
-same overall pattern: teacher-level structural accuracy at a small fraction of
-the sampling cost, with K16 also improving the violation rate. NFE counts
-denoiser evaluations; the Boltz-2 teacher uses three recycle updates.
 
-AlphaFold 3 checkpoints are not included because Google DeepMind's terms do
-not permit public redistribution of the model parameters.
-
-Download the standalone inference checkpoints from
-[`vinaymatt/Blitz-Boltz2`](https://huggingface.co/vinaymatt/Blitz-Boltz2).
-
-K16 is the best default. K8 trades some validity for fewer denoising steps.
-
-See the [quickstart](docs/blitz/QUICKSTART.md) to run the models. The
-[training](docs/blitz/TRAINING.md), [data](docs/blitz/DATA.md), and
-[results](docs/blitz/RESULTS.md) pages describe how they were produced and
-evaluated. [Model lineage](docs/blitz/PROVENANCE.md) explains how this branch
-relates to upstream Boltz. The original Boltz README follows.
-
----
-
-<div align="center">
-  <div>&nbsp;</div>
-  <img src="docs/boltz2_title.png" width="300"/>
-  <img src="https://model-gateway.boltz.bio/a.png?x-pxid=bce1627f-f326-4bff-8a97-45c6c3bc929d" />
-
-[Boltz-1](https://doi.org/10.1101/2024.11.19.624167) | [Boltz-2](https://doi.org/10.1101/2025.06.14.659707) |
-[Slack](https://boltz.bio/join-slack) <br> <br>
-</div>
-
-
-
-![](docs/boltz1_pred_figure.png)
-
-
-## Introduction
-
-Boltz is a family of models for biomolecular interaction prediction. Boltz-1 was the first fully open source model to approach AlphaFold3 accuracy. Our latest work Boltz-2 is a new biomolecular foundation model that goes beyond AlphaFold3 and Boltz-1 by jointly modeling complex structures and binding affinities, a critical component towards accurate molecular design. Boltz-2 is the first deep learning model to approach the accuracy of physics-based free-energy perturbation (FEP) methods, while running 1000x faster — making accurate in silico screening practical for early-stage drug discovery.
-
-All the code and weights are provided under MIT license, making them freely available for both academic and commercial uses. For more information about the model, see the [Boltz-1](https://doi.org/10.1101/2024.11.19.624167) and [Boltz-2](https://doi.org/10.1101/2025.06.14.659707) technical reports. To discuss updates, tools and applications join our [Slack channel](https://boltz.bio/join-slack).
-
-## Installation
-
-> Note: we recommend installing boltz in a fresh python environment
-
-Install boltz with PyPI (recommended):
-
-```
-pip install boltz[cuda] -U
-```
-
-or directly from GitHub for daily updates:
-
-```
-git clone https://github.com/jwohlwend/boltz.git
-cd boltz; pip install -e .[cuda]
-```
-
-If you are installing on CPU-only or non-CUDA GPus hardware, remove `[cuda]` from the above commands. Note that the CPU version is significantly slower than the GPU version.
-
-## Inference
-
-You can run inference using Boltz with:
-
-```
-boltz predict input_path --use_msa_server
-```
-
-`input_path` should point to a YAML file, or a directory of YAML files for batched processing, describing the biomolecules you want to model and the properties you want to predict (e.g. affinity). To see all available options: `boltz predict --help` and for more information on these input formats, see our [prediction instructions](docs/prediction.md). By default, the `boltz` command will run the latest version of the model.
-
-
-### Binding Affinity Prediction
-There are two main predictions in the affinity output: `affinity_pred_value` and `affinity_probability_binary`. They are trained on largely different datasets, with different supervisions, and should be used in different contexts. The `affinity_probability_binary` field should be used to detect binders from decoys, for example in a hit-discovery stage. Its value ranges from 0 to 1 and represents the predicted probability that the ligand is a binder. The `affinity_pred_value` aims to measure the specific affinity of different binders and how this changes with small modifications of the molecule. This should be used in ligand optimization stages such as hit-to-lead and lead-optimization. It reports a binding affinity value as `log10(IC50)`, derived from an `IC50` measured in `μM`. More details on how to run affinity predictions and parse the output can be found in our [prediction instructions](docs/prediction.md).
-
-## Authentication to MSA Server
-
-When using the `--use_msa_server` option with a server that requires authentication, you can provide credentials in one of two ways. More information is available in our [prediction instructions](docs/prediction.md).
- 
-## Evaluation
-
-⚠️ **Coming soon: updated evaluation code for Boltz-2!**
-
-To encourage reproducibility and facilitate comparison with other models, on top of the existing Boltz-1 evaluation pipeline, we will soon provide the evaluation scripts and structural predictions for Boltz-2, Boltz-1, Chai-1 and AlphaFold3 on our test benchmark dataset, and our affinity predictions on the FEP+ benchmark, CASP16 and our MF-PCBA test set.
-
-![Affinity test sets evaluations](docs/pearson_plot.png)
-![Test set evaluations](docs/plot_test_boltz2.png)
-
+NFE denotes denoiser evaluations.  
 
 ## Training
 
-⚠️ **Coming soon: updated training code for Boltz-2!**
+Blitz fine-tunes the Boltz-2 structure module using **discrete multistep
+consistency distillation (MSCD)**. The trunk, confidence model, and affinity
+model remain frozen. Training starts from the released Boltz-2 weights, which
+also provide the teacher targets.
 
-If you're interested in retraining the model, currently for Boltz-1 but soon for Boltz-2, see our [training instructions](docs/training.md).
+Set the data-path variables described in the [training guide](docs/blitz/TRAINING.md),
+then run the launcher for the desired student:
 
+```bash
+# Train K8.
+scripts/train/run_mscd.sh k8
 
-## Contributing
+# Or train K16.
+scripts/train/run_mscd.sh k16
+```
 
-We welcome external contributions and are eager to engage with the community. Connect with us on our [Slack channel](https://boltz.bio/join-slack) to discuss advancements, share insights, and foster collaboration around Boltz-2.
+The launcher checks required data paths and accepts OmegaConf overrides for
+cluster-specific settings. See:
 
-On recent NVIDIA GPUs, Boltz leverages the acceleration provided by [NVIDIA  cuEquivariance](https://developer.nvidia.com/cuequivariance) kernels. Boltz also runs on Tenstorrent hardware thanks to a [fork](https://github.com/moritztng/tt-boltz) by Moritz Thüning.
+- [Training](docs/blitz/TRAINING.md) for schedules, optimizer settings, and checkpoint selection.
+- [Configurations](scripts/train/configs/) for the supplied training configs.
+- [Training data](docs/blitz/DATA.md) for preparation of the RCSB and AlphaFold DB corpora.
+- [Provenance](docs/blitz/PROVENANCE.md) for model lineage and the limitations of the reconstructed K8 training configuration.
 
-## License
+## Evaluation
 
-Our model and code are released under MIT License, and can be freely used for both academic and commercial purposes.
+Evaluation and aggregation scripts are in [`scripts/eval/`](scripts/eval/),
+including `run_evals.py`, `aggregate_evals.py`, and `physcialsim_metrics.py`.
+See [Results](docs/blitz/RESULTS.md) for the benchmark comparison and its
+relationship to the Boltz-2 evaluation protocol.
 
+## SynthID Bio structure detector
 
-## Cite
+[`scripts/synthid_bio/`](scripts/synthid_bio/) contains the standalone scorer
+used in our SynthID Bio experiments. It reconstructs the detector described in
+supplementary Listing 1 of [Stutz et al. (*Nature*, 2026)](https://doi.org/10.1038/s41586-026-10965-y)
+and runs without an AlphaFold 3 source-code dependency. **It is not an official
+DeepMind detector.** Some conventions were inferred from the paper and
+checkpoint layout.
 
-If you use this code or the models in your research, please cite the following papers:
+The scorer requires a full, uncompressed AF3 checkpoint containing the detector
+tensors under `diffuser/~/watermark_detector/point_net/` and a single-model
+prediction in mmCIF format. It reconstructs AF3's 24-slot atom layout, computes
+distance and torsion features, and applies the five-layer point-net detector.
+
+```bash
+python -m pip install -e '.[synthid]'
+
+python scripts/synthid_bio/score.py \
+  --checkpoint /path/to/af3.bin \
+  --structure /path/to/prediction.cif
+```
+
+The output includes the raw detector logit and a Boolean indicating `logit > 0`.
+**Zero is the diagnostic threshold used in our experiments, not DeepMind's
+calibrated detection threshold.**  See the
+[detector documentation](scripts/synthid_bio/README.md) for tokenization details
+and supported atom layouts.
+
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| `src/boltz/` | Model, data pipeline, and command-line interface |
+| `src/boltz/model/potentials/blitz.py` | K8/K16 deterministic sampling policies |
+| `src/boltz/consistency/` | MSCD training code |
+| `scripts/train/` | Training launcher, configurations, and ID splits |
+| `scripts/process/` | RCSB and AlphaFold DB data processing |
+| `scripts/eval/` | Benchmark evaluation and aggregation |
+| `scripts/synthid_bio/` | Standalone SynthID Bio structure detector |
+| `docs/blitz/` | Quickstart, results, training, data, and provenance |
+| `examples/` | Example prediction inputs |
+
+## License and acknowledgments
+
+Blitz builds on [Boltz](https://github.com/jwohlwend/boltz). The repository code
+is distributed under the [MIT License](LICENSE), with upstream attribution
+preserved. Boltz-2 model weights are released under MIT.
+
+AlphaFold 3 parameters are subject to separate Google DeepMind terms and are
+not included. Obtain any AF3 checkpoint required for the detector through the
+official access process and use it under the applicable terms.
+
+## Citation
+Please also cite the relevant upstream Boltz work below. If you use the SynthID
+Bio detector, cite [Stutz et al.](https://doi.org/10.1038/s41586-026-10965-y).
 
 ```bibtex
 @article{passaro2025boltz2,
@@ -144,7 +198,7 @@ If you use this code or the models in your research, please cite the following p
 }
 ```
 
-In addition if you use the automatic MSA generation, please cite:
+If you use automatic MSA generation, also cite ColabFold:
 
 ```bibtex
 @article{mirdita2022colabfold,
