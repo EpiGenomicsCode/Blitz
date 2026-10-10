@@ -46,9 +46,21 @@ normalization, and additional weight on nucleic-acid and ligand atoms.
 The complete configurations are
 `scripts/train/configs/mscd_boltz2_k8_rho40.yaml` and
 `scripts/train/configs/mscd_boltz2_k16_rho40_normalign.yaml`. The launcher
-accepts OmegaConf overrides for cluster-specific settings such as the number of
-nodes and GPUs. Keep the effective batch size at 128 when reproducing the
-training schedule.
+has flags for the settings that normally change between machines:
+
+```bash
+./scripts/train/run_mscd.sh k8 \
+  --output runs/k8 \
+  --teacher-checkpoint /path/to/boltz2_conf.ckpt \
+  --devices 4 \
+  --accumulate 32
+```
+
+When running under a distributed launcher, pass the node count with `--nodes`
+and keep
+`nodes × devices × accumulate = 128` when reproducing the released schedule.
+For example, the 32-GPU run uses `--nodes 8 --devices 4 --accumulate 4`.
+Additional `key=value` arguments are applied as OmegaConf overrides.
 
 The inference checkpoints contain the trunk, distilled structure model, and
 confidence model. They do not require a separate Boltz-2 checkpoint. The
