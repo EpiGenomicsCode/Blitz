@@ -21,11 +21,8 @@ predictions classified as watermarked fell from 100% at initialization to
 More broadly, watermarking methods for generative structure models should treat
 post-training model adaptation, including consistency training, as part of
 their threat model.
-
-We do not publish an operational scorer, detector parameters, or checkpoint
-extraction code. AlphaFold 3 training code and weights are also not included.
-For transparency,
-[`scripts/synthid_bio/`](scripts/synthid_bio/) retains only our
+We retain
+[`scripts/synthid_bio/`](scripts/synthid_bio/) our
 implementation of the architecture in supplementary Listing 1 of
 [Stutz et al. (*Nature*, 2026)](https://doi.org/10.1038/s41586-026-10965-y).
 
